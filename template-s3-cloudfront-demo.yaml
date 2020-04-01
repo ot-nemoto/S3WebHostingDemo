@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Resources:
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+        - Id: !Sub "S3-${S3Bucket}"
+          DomainName: !GetAtt S3Bucket.DomainName
+          S3OriginConfig:
+            OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+        DefaultCacheBehavior:
+          TargetOriginId: !Sub "S3-${S3Bucket}"
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            QueryString: false
+        DefaultRootObject: index.html
+        Enabled: true
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties: 
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "access-identity-${S3Bucket}"
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement: 
+        - Action: 
+          - s3:GetObject
+          Effect: Allow
+          Principal:
+            CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+          Resource: 
+          - !Sub "arn:aws:s3:::${S3Bucket}/*"
+
+Outputs:
+  S3Bucket:
+    Value: !Ref S3Bucket
+  WebsiteURL:
+    Value: !Sub "https://${Distribution.DomainName}"

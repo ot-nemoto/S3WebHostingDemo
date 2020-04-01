@@ -1,0 +1,26 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement: 
+        - Action: 
+          - s3:GetObject
+          Effect: Allow
+          Principal: "*"
+          Resource: 
+          - !Sub "arn:aws:s3:::${S3Bucket}/*"
+
+Outputs:
+  S3Bucket:
+    Value: !Ref S3Bucket
+  WebsiteURL:
+    Value: !GetAtt S3Bucket.WebsiteURL
