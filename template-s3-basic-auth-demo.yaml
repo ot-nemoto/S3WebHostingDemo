@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  User:
+    Type: String
+    Default: ot-nemoto
+  Password:
+    Type: String
+    Default: Passw0rd
+
+Resources:
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn:
+    - BasicAuthFunctionAliaslive
+    Properties:
+      DistributionConfig:
+        Origins:
+        - Id: !Sub "S3-${S3Bucket}"
+          DomainName: !GetAtt S3Bucket.DomainName
+          S3OriginConfig:
+            OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+        DefaultCacheBehavior:
+          TargetOriginId: !Sub "S3-${S3Bucket}"
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            QueryString: false
+          LambdaFunctionAssociations:
+          - EventType: viewer-request
+            LambdaFunctionARN: !Ref BasicAuthFunction.Version
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        IPV6Enabled: false
+        Enabled: true
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties: 
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub "access-identity-${S3Bucket}"
+
+  BasicAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      AutoPublishAlias: live
+      Role: !GetAtt BasicAuthFunctionRole.Arn
+      Runtime: python3.7
+      Handler: index.lambda_handler
+      InlineCode: !Sub |
+        import base64
+        import json
+        #import os
+        def lambda_handler(event, context):
+          print(json.dumps(event))
+          request = event['Records'][0]['cf']['request']
+          headers = request['headers']
+          user = "${User}"
+          password = "${Password}"
+          #user = os.environ['USER']
+          #password = os.environ['PASSWORD']
+          auth_str = 'Basic ' + base64.b64encode('{}:{}'.format(user, password).encode('utf-8')).decode('ascii')
+          if (headers.get('authorization') == None or headers['authorization'][0]['value'] != auth_str):
+            response = {
+              'status': '401',
+              'statusDescription': 'Unauthorized',
+              'body': 'Unauthorized',
+              'headers': {
+                'www-authenticate': [{ 'key': 'WWW-Authenticate', 'value':'Basic' }]
+              }
+            }
+            return response
+          return request
+  BasicAuthFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+            - edgelambda.amazonaws.com
+          Action: sts:AssumeRole
+      Path: /service-role/
+      Policies:
+      - PolicyName: AWSLambdaEdgeExecutionRole
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: "arn:aws:logs:*:*:*"
+          - Effect: Allow
+            Action:
+            - lambda:GetFunction
+            - "lambda:EnableReplication*"
+            - iam:CreateServiceLinkedRole
+            - cloudfront:CreateDistribution
+            - cloudfront:UpdateDistribution
+            Resource: "*"
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement: 
+        - Action: 
+          - s3:GetObject
+          Effect: Allow
+          Principal:
+            CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+          Resource: 
+          - !Sub "arn:aws:s3:::${S3Bucket}/*"
+
+Outputs:
+  S3Bucket:
+    Value: !Ref S3Bucket
+  WebsiteURL:
+    Value: !Sub "https://${Distribution.DomainName}"
